@@ -98,7 +98,7 @@ class BPY_EX():
                         rad = theta[idx]/180*math.pi
                         bpy.data.objects[na].rotation_euler[dir]=rad
                         if name=="004" and theta[idx]==0:
-                            rad = 0.01/180*math.pi
+                            rad = 0/180*math.pi
                             bpy.data.objects[na].rotation_euler[dir]=rad
         bpy.ops.wm.redraw_timer(type='DRAW_WIN_SWAP', iterations=1)
         
@@ -202,6 +202,7 @@ class Robot_Kinematics(BPY_EX):
             theta1 +=([math.atan2(0,t)-math.atan2(self.d5*self.ny-self.py,self.px-self.d5*self.nx)],)
         return theta1
     
+
     def get_theta4(self,theta1:tuple):
         theta4 = tuple()
         for t in theta1:
@@ -275,7 +276,17 @@ class Robot_Kinematics(BPY_EX):
             ans5 = self.get_theta23(ans5)
             ans5 = self.get_theta2(ans5)
         else:
-            print("no theata")
+            print("no theata",tz,ty)
+            p5 = ((dx/np.cos(tz)-self.d5*np.cos(ty))*np.cos(tz),dy,dz+self.d5*np.sin(ty))
+            print(f"p5:{p5}")
+            p5=((dx/np.cos(tz)-self.d5*np.cos(ty))-self.a1x,dz+self.d5*np.sin(ty)-self.d0-self.a1z)
+            sqrt_r = p5[0]**2+p5[1]**2
+            sqrt_b =(self.a3x+self.d4)**2+self.a3z**2
+            cos_2k = (self.d2**2+sqrt_b-sqrt_r)/2/self.d2/(sqrt_b**0.5)
+            
+            print(f"annn:{rad2angle((math.acos(cos_2k),))}")
+            
+            self.get_world_pos("005")
         return ans5
     
     def check_ik(self,P:tuple,ans:list):
@@ -337,15 +348,15 @@ if __name__=="__main__":
     rk = Robot_Kinematics() 
     jn_init = rk.get_euler("001","002","003","004","005","006")
     jn_init =(0,)*6
-    jn_goal = (30,)+(30,)+(10,)+(30,)+(45,)*2
+    jn_goal = (45,)+(30,)+(10,)+(0,)+(45,0)
     rk.set_euler(("001","002","003","004","005","006"),jn_goal)
     rk.get_world_oritention("006")
-    (tx0,ty0,tz0)= rk.get_oritention6()
+    (tx0,ty0,tz0),rad= rk.get_oritention()
     (dx0,dy0,dz0) = rk.get_world_pos("006")
     # # 回到初始姿态
     # rk.set_euler(("001","002","003","004","005","006"),rad2angle(jn_init))
     
     ans5 = rk.ik(tx0,ty0,tz0,dx0,dy0,dz0)
-    rad = rk.check_ik((dx0,dy0,dz0),ans5)
+    # rad = rk.check_ik((dx0,dy0,dz0),ans5)
     # rk.robot_move(rad,3000)
     # md.close_connect()

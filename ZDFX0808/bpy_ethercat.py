@@ -1,3 +1,13 @@
+bl_info = {
+    "name": "Robot_ZDFX0808",
+    "author": "zzk",
+    "version": (0, 0, 1),
+    "blender": (2, 80, 0),
+    "location": "",
+    "description": "",
+    "category": "传习机械臂",
+}
+
 import sys
 import bpy
 import math
@@ -171,7 +181,7 @@ class BPY_EX():
             if check_hit:
                 if self.check_hit("005",("000","001","002")) or self.check_hit("004",("000","001","002")):
                     print("发生碰撞")
-                    return True
+                    return "hitself"
             bpy.ops.object.select_all(action='DESELECT')
             bpy.context.view_layer.objects.active=bpy.data.objects["006"]
             return False
@@ -368,15 +378,26 @@ class Mind(Robot_Kinematics,socket.socket):
             print("收到Mind+消息:", self.payload)
        
 
-
+button_game = False
 class BPY_timer(bpy.types.Operator,Robot_Kinematics):
 
     bl_idname = "wm.modal_timer_operator"
     bl_label = "Modal Timer Operator"
-    
+    bl_options={"REGISTER","UNDO"}
+
     jn = tuple()
     isupdate = 0 # 
 
+    def execute(self, context):  
+        global button_game
+        button_game = True   
+        print(self)   
+        print(context.window_manager)   
+        self._timer = context.window_manager.event_timer_add(1/24, window=context.window) # 将计时器添加到窗口中
+        context.window_manager.modal_handler_add(self) # 将模态处理函数添加到窗口中
+        self.md = Mind("",5011)  # 服务端
+        return {'RUNNING_MODAL'} # 返回到模态，保持运算符在blender上一直处于运行状态
+    
     def recall(self,data=None):
         self.md.payload = None
         content = {'type':'finish',
@@ -387,7 +408,6 @@ class BPY_timer(bpy.types.Operator,Robot_Kinematics):
             pass
     # 模态函数
     def modal(self, context, event):       
-        
         # 按ESC键退出运算符
         if event.type =='ESC':
             self.md.close_connect()
@@ -411,7 +431,7 @@ class BPY_timer(bpy.types.Operator,Robot_Kinematics):
                     P = self.fk(angle)
                     self.recall(P)
                 elif self.md.payload["type"]=="ik":
-                    tx0,ty0,tz0,dx0,dy0,dz0 = tuple(self.md.payload["data"])
+                    tx0,ty0,tz0,dx0,dy0,dz0 = tuple(self.md.payload["data"][1])
                     ans = self.ik(tx0,ty0,tz0,dx0,dy0,dz0)
                     rad = None
                     if ans:
@@ -419,29 +439,61 @@ class BPY_timer(bpy.types.Operator,Robot_Kinematics):
                     self.recall(rad)
                 elif self.md.payload["type"]=="move":
                     jn = angle2rad(self.md.payload["data"])
-                    if self.robot_move(jn,t=self.md.payload["t"],isupdate=self.isupdate,check_hit=self.md.payload["check_hit"]):
+                    res = self.robot_move(jn,t=self.md.payload["t"],isupdate=self.isupdate,check_hit=self.md.payload["check_hit"])
+                    if res:
                         self.isupdate=0
                         print("移动完成")
-                        self.recall()
+                        self.recall(res)
                     else:
                         self.isupdate+=1
             jn = self.get_euler("001","002","003","004","005","006")
             self.set_euler(("001","002","003","004","005","006"),jn)
         return {'PASS_THROUGH'} # 如果没有做事情，则绕过模态(这样在除了上面按键外，保留blender自身快捷键)
 
-    def execute(self, context):
-        self._timer = context.window_manager.event_timer_add(1/24, window=context.window) # 将计时器添加到窗口中
-        context.window_manager.modal_handler_add(self) # 将模态处理函数添加到窗口中
-        self.md = Mind("",5011)  # 服务端
-        return {'RUNNING_MODAL'} # 返回到模态，保持运算符在blender上一直处于运行状态
     # "退出"函数(命令取消时)
     def cancel(self, context):
+        global button_game
         context.window_manager.event_timer_remove(self._timer) # 将给定的窗口中的计时器移除
-        
+        button_game = False 
+    
+# ui_type;固定各式
+class ui_type:
+    bl_space_type,bl_region_type,bl_context="VIEW_3D","UI","objectmode"     
+# 面板1
+class rpu_config(ui_type,bpy.types.Panel):  
+    bl_idname="rpu_config"
+    bl_label="传习机器人"                                                   
+    bl_category="机械臂"                                                
+
+    def draw(self,context):
+        layout=self.layout
+        scene=context.scene
+        layout.label(text="configure",icon="BLENDER")
+        row=layout.row()
+        row1=layout.row()
+        #生成按钮
+        if not button_game:
+            row.operator("wm.modal_timer_operator",text="连接mind+",icon="CUBE",depress=False)
+        row1.operator("",text="连接mind+",icon="CUBE",depress=False)
+
+
+classes=[
+    BPY_timer,
+    rpu_config,
+]
+def register():
+    global button_game
+    button_game=False
+    for item in classes:
+        bpy.utils.register_class(item)
+    
+def unregister():
+    global button_game
+    for item in classes:
+        bpy.utils.unregister_class(item)
+    button_game=False
+
 
 if __name__=="__main__":
-    # 直接注册运算符
-    bpy.utils.register_class(BPY_timer)
-    # 直接运行运算符
-    bpy.ops.wm.modal_timer_operator()
+    register()
 

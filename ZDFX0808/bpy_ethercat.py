@@ -195,14 +195,14 @@ class Robot_Kinematics(BPY_EX):
         self.L7 = 0.11
         self.a1x,self.a1z,self.a3x,self.a3z,self.d0,self.d2,self.d4,self.d5=0.07,0.126,0.091,0.037,0.206,0.39,0.256,0.11
 
-    def fk(self,jiont:tuple):
+    def fk(self,angle:tuple):
         """Forward Kinematics"""
         P5 = np.array([self.L7,0,0,1]).reshape(-1,1)
-        P4 = R_y(jiont[4],(self.DH_context_p_xz[4][0],0,self.DH_context_p_xz[4][1]))@P5
-        P3 = R_x(jiont[3],(self.DH_context_p_xz[3][0],0,self.DH_context_p_xz[3][1]))@P4
-        P2 = R_y(jiont[2],(self.DH_context_p_xz[2][0],0,self.DH_context_p_xz[2][1]))@P3
-        P1 = R_y(jiont[1],(self.DH_context_p_xz[1][0],0,self.DH_context_p_xz[1][1]))@P2
-        P0 = R_z(jiont[0],(self.DH_context_p_xz[0][0],0,self.DH_context_p_xz[0][1]))@P1
+        P4 = R_y(angle[4],(self.DH_context_p_xz[4][0],0,self.DH_context_p_xz[4][1]))@P5
+        P3 = R_x(angle[3],(self.DH_context_p_xz[3][0],0,self.DH_context_p_xz[3][1]))@P4
+        P2 = R_y(angle[2],(self.DH_context_p_xz[2][0],0,self.DH_context_p_xz[2][1]))@P3
+        P1 = R_y(angle[1],(self.DH_context_p_xz[1][0],0,self.DH_context_p_xz[1][1]))@P2
+        P0 = R_z(angle[0],(self.DH_context_p_xz[0][0],0,self.DH_context_p_xz[0][1]))@P1
         P = P0.tolist()
         return (P[0][0],P[1][0],P[2][0])
 
@@ -328,13 +328,16 @@ class Robot_Kinematics(BPY_EX):
             return
         return ans5
     
-    def check_ik(self,P:tuple,ans:list):
-        for list in ans:
+    def check_ik(self,P:tuple,ans4:list,idx=0):
+        pos_err = tuple()
+        for list in ans4:
             print(f"theta:{rad2angle(tuple(list))}")
             ans = self.fk(rad2angle(tuple(list)))
-            tol=1e-5
-            if abs(P[0]-ans[0,0])<tol and abs(P[1]-ans[1,0])<tol and abs(P[2]-ans[2,0])<tol:
-                return list
+            print(ans)
+            pos_err+=(abs(P[idx]-ans[idx]),)
+        index = pos_err.index(min(pos_err))
+        print(f"选择第{index+1}组数据")
+        return rad2angle(tuple(ans4[index]))
             
 
 
@@ -377,40 +380,56 @@ class Mind(Robot_Kinematics,socket.socket):
             conn.send(data)
             print("收到Mind+消息:", self.payload)
        
+    def recall(self,data=None):
+        self.payload = None
+        content = {'type':'finish',
+                   'data':data,}
+        try:
+            self.conn.send(json.dumps(content).encode())
+        except:
+            pass
 
+per_pos = [0.1,0.05,0.01]   # 位置精度
+def myproperty():   # 属性创建
+    global per_pos
+    obj_name = "006"
+    def set_per_x(self,context):
+        per_pos[0]=context.scene.x
+    def set_per_y(self,context):
+        per_pos[1]=context.scene.y
+    def set_per_z(self,context):
+        per_pos[2]=context.scene.z
+    #浮点类型
+    bpy.types.Scene.x=bpy.props.FloatProperty(name="x",min=0.0,max=0.1,step=1,precision=2,update=set_per_x)
+    bpy.types.Scene.y=bpy.props.FloatProperty(name="y",min=0.0,max=0.1,step=1,update=set_per_y)
+    bpy.types.Scene.z=bpy.props.FloatProperty(name="z",min=0.0,max=0.1,step=1,update=set_per_z)
+    # bpy.types.Scene.Dof1=bpy.props.FloatProperty(name="Dof1",min=-180,max=180,step=10,update=Dof1)
 button_game = False
+md = None
 class BPY_timer(bpy.types.Operator,Robot_Kinematics):
 
     bl_idname = "wm.modal_timer_operator"
     bl_label = "Modal Timer Operator"
     bl_options={"REGISTER","UNDO"}
 
-    jn = tuple()
+    goal_jn = tuple()
     isupdate = 0 # 
 
     def execute(self, context):  
-        global button_game
+        global button_game,md
         button_game = True   
         print(self)   
         print(context.window_manager)   
         self._timer = context.window_manager.event_timer_add(1/24, window=context.window) # 将计时器添加到窗口中
         context.window_manager.modal_handler_add(self) # 将模态处理函数添加到窗口中
-        self.md = Mind("",5011)  # 服务端
+        md = Mind("",5011)  # 服务端
         return {'RUNNING_MODAL'} # 返回到模态，保持运算符在blender上一直处于运行状态
     
-    def recall(self,data=None):
-        self.md.payload = None
-        content = {'type':'finish',
-                   'data':data,}
-        try:
-            self.md.conn.send(json.dumps(content).encode())
-        except:
-            pass
     # 模态函数
     def modal(self, context, event):       
         # 按ESC键退出运算符
         if event.type =='ESC':
-            self.md.close_connect()
+            md.close_connect()
             self.cancel(context) # 运行"退出"函数
                         
             # 更新3d视图(如果有)
@@ -421,29 +440,34 @@ class BPY_timer(bpy.types.Operator,Robot_Kinematics):
 
         # 计时器事件(实时检测)
         if event.type == 'TIMER': # 如果是计时器事件，即操作物体
-            if self.md.payload is not None:
-                if self.md.payload["type"]=="get_oritention":
+            if md.payload is not None:
+                if md.payload["type"]=="get_oritention":
                     (tx0,ty0,tz0)= self.get_oritention()
                     (dx0,dy0,dz0) = self.get_world_pos("006")
-                    self.recall((tx0,ty0,tz0,dx0,dy0,dz0))
-                elif self.md.payload["type"]=="fk":
-                    angle = tuple(self.md.payload["data"])
+                    md.recall((tx0,ty0,tz0,dx0,dy0,dz0))
+                elif md.payload["type"]=="fk":
+                    angle = tuple(md.payload["data"])
                     P = self.fk(angle)
-                    self.recall(P)
-                elif self.md.payload["type"]=="ik":
-                    tx0,ty0,tz0,dx0,dy0,dz0 = tuple(self.md.payload["data"][1])
+                    md.recall(P)
+                elif md.payload["type"]=="ik":
+                    tx0,ty0,tz0,dx0,dy0,dz0 = tuple(md.payload["data"][1])
                     ans = self.ik(tx0,ty0,tz0,dx0,dy0,dz0)
                     rad = None
                     if ans:
                         rad = self.check_ik((dx0,dy0,dz0),ans)
-                    self.recall(rad)
-                elif self.md.payload["type"]=="move":
-                    jn = angle2rad(self.md.payload["data"])
-                    res = self.robot_move(jn,t=self.md.payload["t"],isupdate=self.isupdate,check_hit=self.md.payload["check_hit"])
+                    md.recall(rad)
+                elif md.payload["type"]=="move":
+                    jn = angle2rad(md.payload["data"])
+                    if self.goal_jn == jn:
+                        pass
+                    else:
+                        self.isupdate=0
+                        self.goal_jn = jn
+                    res = self.robot_move(jn,t=md.payload["t"],isupdate=self.isupdate,check_hit=md.payload["check_hit"])
                     if res:
                         self.isupdate=0
                         print("移动完成")
-                        self.recall(res)
+                        md.recall(res)
                     else:
                         self.isupdate+=1
             jn = self.get_euler("001","002","003","004","005","006")
@@ -455,7 +479,150 @@ class BPY_timer(bpy.types.Operator,Robot_Kinematics):
         global button_game
         context.window_manager.event_timer_remove(self._timer) # 将给定的窗口中的计时器移除
         button_game = False 
+
+
+
+class add_x(bpy.types.Operator,Robot_Kinematics):
+    bl_idname="add.x"
+    bl_label="add_x"  
+    def execute(self,context):
+        global per_pos
+        print("add_x")
+        (tx0,ty0,tz0) = self.get_oritention()
+        (dx0,dy0,dz0) = self.get_world_pos("006")
+        dx0 =dx0+per_pos[0]
+        ans = self.ik(tx0,ty0,tz0,dx0,dy0,dz0)
+        angle = self.check_ik((dx0,dy0,dz0),ans,0)
+        angle.append(0)
+        t = 2000
+        check_hit = False
+        md.payload = {
+        'robot':"BPY_ZDFX0808",
+        'type':"move",
+        'data':tuple(angle),
+        't':t,
+        'check_hit':check_hit,}
+        return {"FINISHED"} 
     
+class drop_x(bpy.types.Operator,Robot_Kinematics):
+    bl_idname="drop.x"
+    bl_label="drop_x"  
+    def execute(self,context):
+        global per_pos
+        print("drop_x")
+        (tx0,ty0,tz0) = self.get_oritention()
+        (dx0,dy0,dz0) = self.get_world_pos("006")
+        dx0 =dx0-per_pos[0]
+        ans = self.ik(tx0,ty0,tz0,dx0,dy0,dz0)
+        angle = self.check_ik((dx0,dy0,dz0),ans,0)
+        angle.append(0)
+        t = 2000
+        check_hit = False
+        md.payload = {
+        'robot':"BPY_ZDFX0808",
+        'type':"move",
+        'data':tuple(angle),
+        't':t,
+        'check_hit':check_hit,}
+        return {"FINISHED"} 
+    
+class add_y(bpy.types.Operator,Robot_Kinematics):
+    bl_idname="add.y"
+    bl_label="add_y"  
+    def execute(self,context):
+        global per_pos
+        print("add_y")
+        (tx0,ty0,tz0) = self.get_oritention()
+        (dx0,dy0,dz0) = self.get_world_pos("006")
+        dy0 =dy0+per_pos[1]
+        ans = self.ik(tx0,ty0,tz0,dx0,dy0,dz0)
+        angle = self.check_ik((dx0,dy0,dz0),ans,1)
+        angle.append(0)
+        t = 2000
+        check_hit = False
+        md.payload = {
+        'robot':"BPY_ZDFX0808",
+        'type':"move",
+        'data':tuple(angle),
+        't':t,
+        'check_hit':check_hit,}
+        return {"FINISHED"} 
+    
+class drop_y(bpy.types.Operator,Robot_Kinematics):
+    bl_idname="drop.y"
+    bl_label="drop_y"  
+    def execute(self,context):
+        global per_pos
+        print("drop_y")
+        (tx0,ty0,tz0) = self.get_oritention()
+        (dx0,dy0,dz0) = self.get_world_pos("006")
+        dy0 =dy0-per_pos[1]
+        ans = self.ik(tx0,ty0,tz0,dx0,dy0,dz0)
+        angle = self.check_ik((dx0,dy0,dz0),ans,1)
+        angle.append(0)
+        t = 2000
+        check_hit = False
+        md.payload = {
+        'robot':"BPY_ZDFX0808",
+        'type':"move",
+        'data':tuple(angle),
+        't':t,
+        'check_hit':check_hit,}
+        return {"FINISHED"} 
+
+class add_z(bpy.types.Operator,Robot_Kinematics):
+    bl_idname="add.z"
+    bl_label="add_z"  
+    def execute(self,context):
+        global per_pos
+        print("add_z")
+        (tx0,ty0,tz0) = self.get_oritention()
+        (dx0,dy0,dz0) = self.get_world_pos("006")
+        dz0 =dz0+per_pos[2]
+        ans = self.ik(tx0,ty0,tz0,dx0,dy0,dz0)
+        print(ans)
+        angle = self.check_ik((dx0,dy0,dz0),ans,2)
+        angle.append(0)
+        t = 2000
+        check_hit = False
+        md.payload = {
+        'robot':"BPY_ZDFX0808",
+        'type':"move",
+        'data':tuple(angle),
+        't':t,
+        'check_hit':check_hit,}
+        return {"FINISHED"} 
+    
+class drop_z(bpy.types.Operator,Robot_Kinematics):
+    bl_idname="drop.z"
+    bl_label="drop_z"  
+    def execute(self,context):
+        global per_pos
+        print("drop_z")
+        (tx0,ty0,tz0) = self.get_oritention()
+        (dx0,dy0,dz0) = self.get_world_pos("006")
+        dz0 =dz0-per_pos[2]
+        ans = self.ik(tx0,ty0,tz0,dx0,dy0,dz0)
+        print(ans)
+        angle = self.check_ik((dx0,dy0,dz0),ans,2)
+        angle.append(0)
+        t = 2000
+        check_hit = False
+        md.payload = {
+        'robot':"BPY_ZDFX0808",
+        'type':"move",
+        'data':tuple(angle),
+        't':t,
+        'check_hit':check_hit,}
+        return {"FINISHED"} 
+    
+class get_p(bpy.types.Operator,Robot_Kinematics):
+    bl_idname="get.p"
+    bl_label="get_p"  
+    def execute(self,context):
+        self.get_world_pos("006")
+        return {"FINISHED"} 
+
 # ui_type;固定各式
 class ui_type:
     bl_space_type,bl_region_type,bl_context="VIEW_3D","UI","objectmode"     
@@ -471,19 +638,43 @@ class rpu_config(ui_type,bpy.types.Panel):
         layout.label(text="configure",icon="BLENDER")
         row=layout.row()
         row1=layout.row()
+        rowx=layout.row()
+        rowy=layout.row()
+        rowz=layout.row()
+        rowp=layout.row()
+
         #生成按钮
         if not button_game:
             row.operator("wm.modal_timer_operator",text="连接mind+",icon="CUBE",depress=False)
-        row1.operator("",text="连接mind+",icon="CUBE",depress=False)
+        else:
+            row1.prop(scene,"x",text="x:")
+            row1.prop(scene,"y",text="y:")
+            row1.prop(scene,"z",text="z:")
+            rowx.operator("drop.x",text="x-",icon="CUBE",depress=False)
+            rowx.operator("add.x",text="x+",icon="CUBE",depress=False)
+            rowy.operator("drop.y",text="y-",icon="CUBE",depress=False)
+            rowy.operator("add.y",text="y+",icon="CUBE",depress=False)
+            rowz.operator("drop.z",text="z-",icon="CUBE",depress=False)
+            rowz.operator("add.z",text="z+",icon="CUBE",depress=False)
+            rowp.operator("get.p",text="P",icon="CUBE",depress=False)
 
 
 classes=[
     BPY_timer,
+    add_x,
+    drop_x,
+    add_y,
+    drop_y,
+    add_z,
+    drop_z,
+    get_p,
     rpu_config,
 ]
+
 def register():
     global button_game
     button_game=False
+    myproperty()
     for item in classes:
         bpy.utils.register_class(item)
     

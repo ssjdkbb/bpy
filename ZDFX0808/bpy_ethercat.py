@@ -680,9 +680,12 @@ def register():
     
 def unregister():
     global button_game
+    if md:
+        md.close_connect()
     for item in classes:
         bpy.utils.unregister_class(item)
     button_game=False
+
 
 
 if __name__=="__main__":
